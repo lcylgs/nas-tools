@@ -165,7 +165,8 @@ class Qbittorrent(IDownloadClient):
         else:
             return None
 
-    def add_torrent(self, content, mtype, is_paused=False, tag=None, download_dir=None):
+    def add_torrent(self, content, mtype, is_paused=False, tag=None, download_dir=None,
+                    upload_limit=None, download_limit=None):
         if not self.qbc or not content:
             return False
         try:
@@ -189,6 +190,8 @@ class Qbittorrent(IDownloadClient):
                                                 category=category,
                                                 is_paused=is_paused,
                                                 tags=tag,
+                                                upload_limit=upload_limit,
+                                                download_limit=download_limit,
                                                 use_auto_torrent_management=use_auto_torrent_management)
             else:
                 qbc_ret = self.qbc.torrents_add(torrent_files=content,
@@ -196,6 +199,8 @@ class Qbittorrent(IDownloadClient):
                                                 category=category,
                                                 is_paused=is_paused,
                                                 tags=tag,
+                                                upload_limit=upload_limit,
+                                                download_limit=download_limit,
                                                 use_auto_torrent_management=use_auto_torrent_management)
             self.qbc.auth_log_out()
             return True if qbc_ret and str(qbc_ret).find("Ok") != -1 else False

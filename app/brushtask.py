@@ -508,6 +508,8 @@ class BrushTask(object):
                                          mtype=None,
                                          tag=tag,
                                          is_paused=True,
+                                         upload_limit=upspeed,
+                                         download_limit=downspeed,
                                          download_dir=downloadercfg.get("save_dir"))
             if ret:
                 # QB添加下载后需要时间，重试5次每次等待5秒
