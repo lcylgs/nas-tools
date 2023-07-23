@@ -268,13 +268,14 @@ class BrushTask(object):
                 if self.is_torrent_handled(enclosure=enclosure):
                     log.info("【Brush】%s 已在刷流任务中" % torrent_name)
                     continue
-                try:
-                    if not self.check_torrent(enclosure, taskinfo):
-                        log.info("【Brush】检查种子页面%s不符合条件" % enclosure)
+                if rss_url.find('iptorrents') > 0:
+                    try:
+                        if not self.check_ipt_torrent(enclosure, taskinfo):
+                            log.info("【Brush】检查种子页面%s不符合条件" % enclosure)
+                            continue
+                    except Exception as e:
+                        log.info("【Brush】检查种子页面脚本异常:%s" % traceback.format_exc() )
                         continue
-                except Exception as e:
-                    log.info("【Brush】检查种子页面脚本异常:%s" % traceback.format_exc() )
-                    continue
                 # 开始下载
                 log.debug("【Brush】%s 符合条件，开始下载..." % torrent_name)
                 if self.__download_torrent(taskinfo=taskinfo,
@@ -1028,7 +1029,7 @@ class BrushTask(object):
         """
         return self.dbhelper.get_brushtask_torrent_by_enclosure(enclosure)
 
-    def check_torrent(self, torrent_url, taskinfo):
+    def check_ipt_torrent(self, torrent_url, taskinfo):
         log.info("开始执行check_torrent:%s" % (torrent_url))
         page_url = "https://iptorrents.com/torrent.php?id=%s" % \
                    torrent_url.replace("https://iptorrents.com/download.php/",'').split('/')[0]
