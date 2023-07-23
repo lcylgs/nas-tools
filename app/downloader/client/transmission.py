@@ -586,3 +586,15 @@ class Transmission(_IDownloadClient):
         except Exception as err:
             ExceptionUtils.exception_traceback(err)
             return False
+
+    def get_client_free_space_on_disk(self):
+        if not self.trc:
+            return False
+        try:
+            free_space_on_disk = self.trc.free_space(self.download_dir)
+            if free_space_on_disk:
+                return free_space_on_disk
+            return False
+        except Exception as err:
+            ExceptionUtils.exception_traceback(err)
+            return False
