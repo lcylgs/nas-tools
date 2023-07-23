@@ -1,117 +1,144 @@
 import os
 import signal
 import sys
-
-# 添加第三方库入口,按首字母顺序，引入brushtask时涉及第三方库，需提前引入
-with open(os.path.join(os.path.dirname(__file__),
-                       "third_party.txt"), "r") as f:
-    third_party = f.readlines()
-    for third_party_lib in third_party:
-        sys.path.append(os.path.join(os.path.dirname(__file__),
-                                     "third_party",
-                                     third_party_lib.strip()).replace("\\", "/"))
-
-# 运行环境判断
-is_windows_exe = getattr(sys, 'frozen', False) and (os.name == "nt")
-if is_windows_exe:
-    # 托盘相关库
-    import threading
-    from windows.trayicon import trayicon
-    # 初始化环境变量
-    os.environ["NASTOOL_CONFIG"] = os.path.join(os.path.dirname(sys.executable),
-                                                "config",
-                                                "config.yaml").replace("\\", "/")
-    os.environ["NASTOOL_LOG"] = os.path.join(os.path.dirname(sys.executable),
-                                             "config",
-                                             "logs").replace("\\", "/")
-    try:
-        config_dir = os.path.join(os.path.dirname(sys.executable),
-                                  "config").replace("\\", "/")
-        if not os.path.exists(config_dir):
-            os.makedirs(config_dir)
-        feapder_tmpdir = os.path.join(os.path.dirname(__file__),
-                                      "feapder",
-                                      "network",
-                                      "proxy_file").replace("\\", "/")
-        if not os.path.exists(feapder_tmpdir):
-            os.makedirs(feapder_tmpdir)
-    except Exception as err:
-        print(err)
-
 import warnings
-import log
-from config import Config
-from app.brushtask import BrushTask
-from app.sync import run_monitor, stop_monitor
-from app.scheduler import run_scheduler, stop_scheduler
-from app.utils.check_config import check_config
-from app.utils import SystemUtils, IndexerHelper
-from app.utils.types import OsType
-from version import APP_VERSION
-from web.app import FlaskApp
-from app.rsschecker import RssChecker
 
 warnings.filterwarnings('ignore')
 
+# 运行环境判断
+is_executable = getattr(sys, 'frozen', False)
+is_windows_exe = is_executable and (os.name == "nt")
+if is_windows_exe:
+    # 托盘相关库
+    import threading
+    from package.trayicon import TrayIcon, NullWriter
+
+if is_executable:
+    # 可执行文件初始化环境变量
+    config_path = os.path.join(os.path.dirname(sys.executable), "config").replace("\\", "/")
+    os.environ["NASTOOL_CONFIG"] = os.path.join(config_path, "config.yaml").replace("\\", "/")
+    os.environ["NASTOOL_LOG"] = os.path.join(config_path, "logs").replace("\\", "/")
+    try:
+        if not os.path.exists(config_path):
+            os.makedirs(config_path)
+    except Exception as err:
+        print(str(err))
+
+from config import Config
+import log
+from web.action import WebAction
+from web.main import App
+from app.db import init_db, update_db, init_data
+from app.helper import init_chrome
+from initializer import update_config, check_config,  start_config_monitor, stop_config_monitor
+from version import APP_VERSION
+
 
 def sigal_handler(num, stack):
-    if SystemUtils.get_system() == OsType.LINUX and SystemUtils.check_process("supervisord"):
-        print(str(stack))
-        log.warn('捕捉到退出信号：%s，开始退出...' % num)
-        # 停止定时服务
-        stop_scheduler()
-        # 停止监控
-        stop_monitor()
-        # 退出主进程
-        sys.exit()
+    """
+    信号处理
+    """
+    log.warn('捕捉到退出信号：%s，开始退出...' % num)
+    # 关闭配置文件监控
+    log.info('关闭配置文件监控...')
+    stop_config_monitor()
+    # 关闭服务
+    log.info('关闭服务...')
+    WebAction.stop_service()
+    # 退出主进程
+    log.info('退出主进程...')
+    # 退出
+    os._exit(0)
 
 
-if __name__ == "__main__":
+def get_run_config(forcev4=False):
+    """
+    获取运行配置
+    """
+    _web_host = "::"
+    _web_port = 3000
+    _ssl_cert = None
+    _ssl_key = None
+    _debug = False
 
-    # 参数
-    os.environ['TZ'] = 'Asia/Shanghai'
-    log.console("配置文件地址：%s" % os.environ.get('NASTOOL_CONFIG'))
-    log.console('NASTool 当前版本号：%s' % APP_VERSION)
+    app_conf = Config().get_config('app')
+    if app_conf:
+        if forcev4:
+            _web_host = "0.0.0.0"
+        elif app_conf.get("web_host"):
+            _web_host = app_conf.get("web_host").replace('[', '').replace(']', '')
+        _web_port = int(app_conf.get('web_port')) if str(app_conf.get('web_port', '')).isdigit() else 3000
+        _ssl_cert = app_conf.get('ssl_cert')
+        _ssl_key = app_conf.get('ssl_key')
+        _ssl_key = app_conf.get('ssl_key')
+        _debug = True if app_conf.get("debug") else False
 
+    app_arg = dict(host=_web_host, port=_web_port, debug=_debug, threaded=True, use_reloader=False)
+    if _ssl_cert:
+        app_arg['ssl_context'] = (_ssl_cert, _ssl_key)
+    return app_arg
+
+
+# 退出事件
+signal.signal(signal.SIGINT, sigal_handler)
+signal.signal(signal.SIGTERM, sigal_handler)
+
+
+def init_system():
+    # 配置
+    log.console('NAStool 当前版本号：%s' % APP_VERSION)
+    # 数据库初始化
+    init_db()
+    # 数据库更新
+    update_db()
+    # 数据初始化
+    init_data()
+    # 升级配置文件
+    update_config()
     # 检查配置文件
-    config = Config()
-    if not check_config(config):
-        sys.exit()
+    check_config()
 
-    # 启动进程
-    log.console("开始启动进程...")
 
-    # 退出事件
-    signal.signal(signal.SIGINT, sigal_handler)
-    signal.signal(signal.SIGTERM, sigal_handler)
+def start_service():
+    log.console("开始启动服务...")
+    # 启动服务
+    WebAction.start_service()
+    # 用户认证
+    WebAction.auth_user_level()
+    # 监听配置文件变化
+    start_config_monitor()
 
-    # 启动定时服务
-    run_scheduler()
 
-    # 启动监控服务
-    run_monitor()
+# 系统初始化
+init_system()
 
-    # 启动刷流服务
-    BrushTask()
+# 启动服务
+start_service()
 
-    # 启动自定义订阅服务
-    RssChecker()
 
-    # 加载索引器配置
-    IndexerHelper()
-
+# 本地运行
+if __name__ == '__main__':
     # Windows启动托盘
     if is_windows_exe:
-        homepage_port = config.get_config('app').get('web_port')
+        homepage = Config().get_config('app').get('domain')
+        if not homepage:
+            homepage = "http://localhost:%s" % str(Config().get_config('app').get('web_port'))
         log_path = os.environ.get("NASTOOL_LOG")
+
+        sys.stdout = NullWriter()
+        sys.stderr = NullWriter()
 
 
         def traystart():
-            tray = trayicon(homepage_port, log_path)
+            TrayIcon(homepage, log_path)
 
 
-        p1 = threading.Thread(target=traystart, daemon=True)
-        p1.start()
+        if len(os.popen("tasklist| findstr %s" % os.path.basename(sys.executable), 'r').read().splitlines()) <= 2:
+            p1 = threading.Thread(target=traystart, daemon=True)
+            p1.start()
 
-    # 启动主WEB服务
-    FlaskApp().run_service()
+    # 初始化浏览器驱动
+    init_chrome()
+
+    # Flask启动
+    App.run(**get_run_config(is_windows_exe))

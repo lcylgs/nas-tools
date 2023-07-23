@@ -1,10 +1,12 @@
 import os.path
-import re
+import regex as re
 
+import log
+from app.helper import WordsHelper
 from app.media.meta.metaanime import MetaAnime
 from app.media.meta.metavideo import MetaVideo
 from app.utils.types import MediaType
-from config import RMT_MEDIAEXT, Config
+from config import RMT_MEDIAEXT
 
 
 def MetaInfo(title, subtitle=None, mtype=None):
@@ -15,44 +17,39 @@ def MetaInfo(title, subtitle=None, mtype=None):
     :param mtype: 指定识别类型，为空则自动识别类型
     :return: MetaAnime、MetaVideo
     """
-    config = Config()
-    # 应用屏蔽词
-    used_ignored_words = []
-    # 应用替换词
-    used_replaced_words = []
-    # 屏蔽词
-    ignored_words = config.get_config('laboratory').get("ignored_words")
-    if ignored_words:
-        ignored_words = re.compile(r'' + ignored_words)
-        # 去重
-        used_ignored_words = list(set(re.findall(ignored_words, title)))
-        title = re.sub(ignored_words, '', title)
-    # 替换词
-    replaced_words = config.get_config('laboratory').get("replaced_words")
-    if replaced_words:
-        replaced_words = replaced_words.split("|")
-        for replaced_word in replaced_words:
-            if not replaced_word:
-                continue
-            replaced_word_info = replaced_word.split("@")
-            if re.findall(r'' + replaced_word_info[0], title):
-                used_replaced_words.append(replaced_word)
-                title = re.sub(r'' + replaced_word_info[0], r'' + replaced_word_info[-1], title)
+
+    # 记录原始名称
+    org_title = title
+    # 应用自定义识别词，获取识别词处理后名称
+    rev_title, msg, used_info = WordsHelper().process(title)
+    if subtitle:
+        subtitle, _, _ = WordsHelper().process(subtitle)
+
+    if msg:
+        for msg_item in msg:
+            log.warn("【Meta】%s" % msg_item)
+
     # 判断是否处理文件
-    if os.path.splitext(title)[-1] in RMT_MEDIAEXT:
+    if org_title and os.path.splitext(org_title)[-1] in RMT_MEDIAEXT:
         fileflag = True
     else:
         fileflag = False
-    if mtype == MediaType.ANIME or is_anime(title):
-        meta_info = MetaAnime(title, subtitle, fileflag)
-        meta_info.ignored_words = used_ignored_words
-        meta_info.replaced_words = used_replaced_words
-        return meta_info
+
+    if mtype == MediaType.ANIME or is_anime(rev_title):
+        meta_info = MetaAnime(rev_title, subtitle, fileflag)
     else:
-        meta_info = MetaVideo(title, subtitle, fileflag)
-        meta_info.ignored_words = used_ignored_words
-        meta_info.replaced_words = used_replaced_words
-        return meta_info
+        meta_info = MetaVideo(rev_title, subtitle, fileflag)
+
+    # 设置原始名称
+    meta_info.org_string = org_title
+    # 设置识别词处理后名称
+    meta_info.rev_string = rev_title
+    # 设置应用的识别词
+    meta_info.ignored_words = used_info.get("ignored")
+    meta_info.replaced_words = used_info.get("replaced")
+    meta_info.offset_words = used_info.get("offset")
+
+    return meta_info
 
 
 def is_anime(name):

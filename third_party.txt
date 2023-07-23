@@ -1,7 +1,6 @@
 feapder
-qbittorrent-api
+qbittorrent-api/src
 anitopy
 plexapi
 transmission-rpc
-python-opensubtitles
-cn2an
+slack_bolt

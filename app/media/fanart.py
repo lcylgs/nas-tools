@@ -1,12 +1,12 @@
 from functools import lru_cache
 
-from app.utils import RequestUtils
+from app.utils import RequestUtils, ExceptionUtils
 from app.utils.types import MediaType
 from config import Config, FANART_MOVIE_API_URL, FANART_TV_API_URL
 
 
 class Fanart:
-    _proxies = None
+    _proxies = Config().get_proxies()
     _movie_image_types = ['movieposter',
                           'hdmovielogo',
                           'moviebackground',
@@ -22,6 +22,9 @@ class Fanart:
                        'seasonthumb',
                        'tvposter',
                        'hdclearart']
+    _season_types = ['seasonposter',
+                     'seasonthumb',
+                     'seasonbanner']
     _images = {}
 
     def __init__(self):
@@ -29,7 +32,6 @@ class Fanart:
 
     def init_config(self):
         self._images = {}
-        self._proxies = Config().get_proxies()
 
     def __get_fanart_images(self, media_type, queryid):
         if not media_type or not queryid:
@@ -48,7 +50,7 @@ class Fanart:
                     for image_type in self._tv_image_types:
                         images = ret.json().get(image_type)
                         if isinstance(images, list):
-                            if image_type in ['seasonposter', 'seasonthumb', 'seasonbanner']:
+                            if image_type in self._season_types:
                                 if not self._images.get(image_type):
                                     self._images[image_type] = {}
                                 for image in images:
@@ -57,9 +59,12 @@ class Fanart:
                             else:
                                 self._images[image_type] = images[0].get('url') if isinstance(images[0], dict) else ""
                         else:
-                            self._images[image_type] = ""
+                            if image_type in self._season_types:
+                                self._images[image_type] = {}
+                            else:
+                                self._images[image_type] = ""
         except Exception as e2:
-            print(str(e2))
+            ExceptionUtils.exception_traceback(e2)
 
     @classmethod
     @lru_cache(maxsize=256)
@@ -71,7 +76,7 @@ class Fanart:
         try:
             return RequestUtils(proxies=cls._proxies, timeout=5).get_res(image_url)
         except Exception as err:
-            print(str(err))
+            ExceptionUtils.exception_traceback(err)
         return None
 
     def get_backdrop(self, media_type, queryid, default=""):
