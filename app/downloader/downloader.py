@@ -1478,3 +1478,22 @@ class Downloader:
         )
         self.init_config()
         return ret
+
+    def get_client_free_space_on_disk(self, downloader_id=None):
+        """
+        获取下载器剩余磁盘信息
+        :param downloader_id: 下载器ID
+        """
+        if not downloader_id:
+            downloader_id = self.default_downloader_id
+        _client = self.__get_client(downloader_id)
+        if not _client:
+            return False
+        try:
+            free_space_on_disk = _client.get_client_free_space_on_disk()
+            if free_space_on_disk:
+                return free_space_on_disk
+            return False
+        except Exception as err:
+            ExceptionUtils.exception_traceback(err)
+            return False

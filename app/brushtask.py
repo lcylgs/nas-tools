@@ -18,9 +18,7 @@ from app.utils import StringUtils, ExceptionUtils, RequestUtils
 from app.utils.commons import singleton
 from app.utils.types import BrushDeleteType
 from config import BRUSH_REMOVE_TORRENTS_INTERVAL, Config
-import requests
 from bs4 import BeautifulSoup
-import qbittorrentapi
 import traceback
 from decimal import Decimal
 
@@ -219,6 +217,10 @@ class BrushTask(object):
         else:
             log.info("【Brush】%s RSS获取数据：%s" % (site_name, len(rss_result)))
 
+        if rss_url.find('iptorrents') > 0:
+            ipt_c = 'https://iptorrents.com/t?mark-read'
+            res_ipt_c = RequestUtils(cookies=taskinfo.get("cookie"), timeout=60, headers=taskinfo.get("ua")).get_res(url=ipt_c)
+            log.info('清除IPT新种标记')
         # 同时下载数
         max_dlcount = rss_rule.get("dlcount")
         success_count = 0
@@ -265,6 +267,13 @@ class BrushTask(object):
                 # 检查是否已处理过
                 if self.is_torrent_handled(enclosure=enclosure):
                     log.info("【Brush】%s 已在刷流任务中" % torrent_name)
+                    continue
+                try:
+                    if not self.check_torrent(enclosure, taskinfo):
+                        log.info("【Brush】检查种子页面%s不符合条件" % enclosure)
+                        continue
+                except Exception as e:
+                    log.info("【Brush】检查种子页面脚本异常:%s" % traceback.format_exc() )
                     continue
                 # 开始下载
                 log.debug("【Brush】%s 符合条件，开始下载..." % torrent_name)
@@ -539,6 +548,11 @@ class BrushTask(object):
         """
         检查是否还能添加新的下载
         """
+        log.info("【Brush】开始执行检查下载器:%s 磁盘空间" % taskinfo.get("downloader_name"))
+        free_space_on_disk = self.downloader.get_client_free_space_on_disk(downloader_id=taskinfo.get('downloader'))
+        if free_space_on_disk and free_space_on_disk < (30 * 1024 * 1024 * 1024):
+            log.info("【Brush】下载器:%s 磁盘空间不足" % taskinfo.get("downloader_name"))
+            return False
         if not taskinfo:
             return False
         # 判断大小
@@ -801,7 +815,7 @@ class BrushTask(object):
                     localtz = pytz.timezone(Config().get_timezone())
                     localnowtime = datetime.now().astimezone(localtz)
                     localpubdate = pubdate.astimezone(localtz)
-                    pudate_hour = int(localnowtime.timestamp() - localpubdate.timestamp()) / 3600
+                    pudate_hour = int(localnowtime.timestamp() - localpubdate.timestamp()) # / 3600
                     log.debug('【Brush】发布时间：%s，当前时间：%s，时间间隔：%f hour' % (
                         localpubdate.isoformat(), localnowtime.isoformat(), pudate_hour))
                     if rule_pubdates[0] == "lt" and pudate_hour >= float(min_pubdate):
@@ -1013,3 +1027,49 @@ class BrushTask(object):
         判断种子是否已经处理过
         """
         return self.dbhelper.get_brushtask_torrent_by_enclosure(enclosure)
+
+    def check_torrent(self, torrent_url, taskinfo):
+        log.info("开始执行check_torrent:%s" % (torrent_url))
+        page_url = "https://iptorrents.com/torrent.php?id=%s" % \
+                   torrent_url.replace("https://iptorrents.com/download.php/",'').split('/')[0]
+        response = RequestUtils(cookies=taskinfo.get("cookie"), timeout=60,
+                                headers=taskinfo.get("ua")).get_res(url=page_url)
+        data = response.text
+        soup = BeautifulSoup(data, 'lxml')
+        sub = soup.find_all('div', class_='sub')
+        if len(sub) > 0:
+            size = sub[0].text.split(' ')[1]
+            size_dec = Decimal(size)
+            if sub[0].text.split(' ')[2] == 'GB':
+                size_dec = Decimal(size) * 1024
+            if round(size_dec) > 100*1024 or round(size_dec) < 15*1024:
+                log.info("【Brush】种子大小:{size} {size_}，跳过".format(size=size, size_=sub[0].text.split(' ')[2]))
+            elapsedDate = sub[1].find_all('span', class_='elapsedDate')[0].attrs['title']
+            try:
+                interval = datetime.now() - \
+                           datetime.strptime(elapsedDate, "%A, %B %d, %Y at %I:%M%p")
+                if (interval.seconds-3600*8) > 600:
+                    log.info("【Brush】种子上传时间:{time} 超过10分钟，跳过".format(time=elapsedDate))
+                    return False
+            except Exception as e:
+                log.info("【Brush】解析上传时间{time}错误，跳过".format(time=elapsedDate))
+                #return False
+        tags_sub = soup.find_all('div', class_='tags sub')
+        if len(tags_sub) > 0:
+            free = tags_sub[0].find_all('span', class_='free')
+            if len(free) > 0 and free[0].text == 'Freeleech':
+                # print(free[0].text)
+                log.info("【Brush】{page_url} 免费状态:{free}".format(page_url=page_url,free=free[0].text))
+                uploads = soup.find_all('i', class_='fa fa-angle-double-up grn')[0].parent.text.replace(' ', '')
+                if int(uploads) > 5:
+                    log.info("【Brush】{page_url} 做种人数:{uploads}，跳过".format(page_url=page_url,uploads=uploads))
+                    return False
+                else:
+                    log.info("【Brush】{page_url} 做种人数:{uploads}，下载".format(page_url=page_url,uploads=uploads))
+                    return True
+            else:
+                log.info("【Brush】{page_url} 不是一个免费资源，跳过".format(page_url=page_url))
+                return False
+        else:
+            log.info("【Brush】打开页面：{page_url} 错误，跳过".format(page_url=page_url))
+            return False

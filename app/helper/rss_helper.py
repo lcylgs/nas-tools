@@ -4,6 +4,7 @@ from app.db import MainDb, DbPersist
 from app.db.models import RSSTORRENTS
 from app.utils import RssTitleUtils, StringUtils, RequestUtils, ExceptionUtils, DomUtils
 from config import Config
+from decimal import Decimal
 
 
 class RssHelper:
@@ -69,6 +70,12 @@ class RssHelper:
                             link = None
                         # 大小
                         size = DomUtils.tag_value(item, "enclosure", "length", default=0)
+                        if enclosure.find('iptorrents') > 0:
+                            size_ipt = description.split(';')[0]
+                            if size_ipt.split(' ')[1] == 'GB':
+                                size = round(Decimal(size_ipt.split(' ')[0]) * 1024 * 1024 * 1024)
+                            elif size_ipt.split(' ')[1] == 'MB':
+                                size = round(Decimal(size_ipt.split(' ')[0]) * 1024 * 1024)
                         if size and str(size).isdigit():
                             size = int(size)
                         else:
